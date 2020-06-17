@@ -1,0 +1,169 @@
+#!/bin/bash
+
+set -eu
+
+# Wrapper for qutebrowser that allows the user to maintain different profiles for qutebrowser
+#
+usage="qutebrowser-profile [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]"
+#
+# --choose, -c
+#   If specified, the user is asked to select a profile via dmenu. If dmenu returns an empty string or non-zero 
+#   exit code (eg user pressed escape instead of choosing an option) the operation is aborted and qutebrowser 
+#   is not opened.
+#
+#   The user can choose any existing profile or type the name of a new profile into dmenu to load qutebrowser
+#   in a new profile. See --only-existing below to restrict this.
+#
+# --only-existing, e
+#   If specified, and --choose is in operation, the user can only choose an existing profile.
+#
+
+die() {
+  echo -e "$@" >&2
+  exit 1
+}
+
+# usage: checkProfileExists <profile>
+checkProfileExists() {
+  profile="$1"
+  [ -d "$profilesRoot/$profile" ] || die "profile $profile does not exist"
+}
+
+# usage: runQbWithProfile <profile>
+runQbWithProfile() {
+  profile="$1"
+  qbArgs+=("-r" "$profile")
+
+  runQb ${qbArgs[@]}
+}
+
+# usage: runQb <args>
+runQb() {
+  # https://github.com/ayekat/dotfiles/blob/master/bin/qutebrowser
+  # https://wiki.archlinux.org/index.php/Qutebrowser#dwb-like_session_handling
+  
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/cache → $XDG_CACHE_HOME/qutebrowser/$session
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/data → $XDG_DATA_HOME/qutebrowser/$session
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/config → $XDG_CONFIG_HOME/qutebrowser
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/runtime (no symlink, regular directory)
+  #
+  # We then specify $XDG_RUNTIME_DIR/qutebrowser/$session as a --basedir, and the
+  # files will end up in their intended locations (notice how the config directory
+  # is the same for all sessions, as there is no point in keeping it separate).
+  #
+  # YOU HAVE BEEN WARNED.
+  #
+  # Written by ayekat in an burst of nostalgy, on a mildly cold wednesday night in
+  # February 2017.
+  #
+  # Enhanced a little by jonny on a dreary cold Friday morning in December 2018.
+
+  # Set default values for the variables as defined in the XDG base directory spec
+  # (https://specifications.freedesktop.org/basedir-spec/latest/):
+  XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+  XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+  XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+  # Translate options: remove occurrences of -r/--restore from the list of
+  # command line arguments and save the session name for later; ignore -R (TODO):
+  session='default'
+  basedir_specified=0
+  opts_read=0
+  while [ $opts_read -lt $# ]; do
+    opt="$1" && shift
+    case "$opt" in
+      (--basedir) basedir_specified=1 ;;
+      (-r|-[!-]*r|--restore) test $# -gt 0 && session="$1" && shift && continue ;;
+      (-R) continue ;; # TODO
+    esac
+    set -- "$@" "$opt"
+    opts_read=$((opts_read + 1))
+  done
+
+  # Set up session base directory, unless --basedir has been specified by the
+  # user:
+  if [ $basedir_specified -eq 0 ]; then
+    basedir="$XDG_RUNTIME_DIR/qutebrowser/$session"
+    set -- --basedir "$basedir" "$@"
+    mkdir -p \
+      "$basedir" \
+      "$XDG_CONFIG_HOME/qutebrowser" \
+      "$XDG_CACHE_HOME/qutebrowser/$session" \
+      "$XDG_DATA_HOME/qutebrowser/$session" \
+      "$basedir/runtime"
+    ln -fsT "$XDG_CONFIG_HOME/qutebrowser" "$basedir/config"
+    ln -fsT "$XDG_CACHE_HOME/qutebrowser/$session" "$basedir/cache"
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
+  fi
+
+  qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@"
+}
+
+uid=$(id -u)
+profilesRoot="/run/user/$uid/qutebrowser"
+choose=0
+onlyExisting=0
+load=""
+new=""
+declare -a qbArgs
+
+while true; do
+  [ $# -eq 0 ] && break
+
+  case $1 in
+    --choose|-c) choose=1; shift ;;
+    --only-existing|-e) onlyExisting=1; shift ;;
+    --load|-l)
+      [ $# -ge 2 ] || die "you must specify a profile to load\n\n$usage"
+      load="$2"
+      shift; shift;
+      ;;
+    --new|-n)
+      [ $# -ge 2 ] || die "you must specify a profile to create\n\n$usage"
+      new="$2";shift; shift
+      ;;
+
+    --restore|-r)
+      # these are qutebrowser args that interfere with our profile management, so we filter them out
+      echo "warning: ignoring $1" >&2
+      shift; shift; # -r has a <session> arg, so skip that too
+      ;;
+
+    --override-restore|-R)
+      # these are qutebrowser args that interfere with our profile management, so we filter them out
+      echo "warning: ignoring $1" >&2
+      shift;
+      ;;
+
+    *) qbArgs+=("$1"); shift; ;;
+  esac
+done
+
+if [ $choose -eq 1 ]; then
+  [ -n "$new" ] && die "cannot use --choose with --new"
+  [ -n "$load" ] && die "cannot use --choose with --load"
+
+  dmenuArgs="-p qutebrowser"
+  [ $onlyExisting -eq 1 ] && dmenuArgs="$dmenuArgs -no-custom"
+
+  chosenProfile=$(
+    find "$profilesRoot" -mindepth 1 -maxdepth 1 -type d -printf "%P\n" | dmenu $dmenuArgs
+  )
+
+  [ -z "$chosenProfile" ] && die "no profile chosen"
+  [ $onlyExisting -eq 1 ] && checkProfileExists "$chosenProfile" # double-check
+
+  runQbWithProfile "$chosenProfile"
+
+elif [ -n "$load" ]; then
+  [ -n "$new" ] && die "cannot use --load with --new"
+  checkProfileExists "$load"
+  
+  runQbWithProfile "$load"
+
+elif [ -n "$new" ]; then
+  [ -n "$load" ] && die "cannot use --load with --new"
+  
+  runQbWithProfile "$new"
+fi
