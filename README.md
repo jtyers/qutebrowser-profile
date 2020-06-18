@@ -29,7 +29,7 @@ Note that:
 
 Here's the full options list (also available with `--help`):
 
-````
+```
   qutebrowser-profile - use qutebrowser with per-profile cache, session history, etc
 
 USAGE
@@ -54,6 +54,7 @@ USAGE
   
   --qutebrowser
     Override location of qutebrowser to call.
+
 ```
 
 ## Licence
