@@ -40,7 +40,7 @@ USAGE
     The user can choose any existing profile or type the name of a new profile into dmenu to load qutebrowser
     in a new profile. See --only-existing below to restrict this.
  
-  --only-existing, e
+  --only-existing, -e
     If specified, and --choose is in operation, the user can only choose an existing profile.
  
   --list
