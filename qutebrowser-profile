@@ -23,27 +23,52 @@
 # SOFTWARE.
 #
 
-set -eu
-
 # Wrapper for qutebrowser that allows the user to maintain different profiles for qutebrowser
 #
-usage="qutebrowser-profile [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]"
-#
-# --choose, -c
-#   If specified, the user is asked to select a profile via dmenu. If dmenu returns an empty string or non-zero 
-#   exit code (eg user pressed escape instead of choosing an option) the operation is aborted and qutebrowser 
-#   is not opened.
-#
-#   The user can choose any existing profile or type the name of a new profile into dmenu to load qutebrowser
-#   in a new profile. See --only-existing below to restrict this.
-#
-# --only-existing, e
-#   If specified, and --choose is in operation, the user can only choose an existing profile.
-#
+usage="qutebrowser-profile [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]"
+read -r -d '' help <<EOF
+  qutebrowser-profile - use qutebrowser with per-profile cache, session history, etc
+
+USAGE
+  qutebrowser-profile [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]
+
+  --choose, -c
+    If specified, the user is asked to select a profile via dmenu. If dmenu returns an empty string or non-zero 
+    exit code (eg user pressed escape instead of choosing an option) the operation is aborted and qutebrowser 
+    is not opened.
+ 
+    The user can choose any existing profile or type the name of a new profile into dmenu to load qutebrowser
+    in a new profile. See --only-existing below to restrict this.
+ 
+  --only-existing, e
+    If specified, and --choose is in operation, the user can only choose an existing profile.
+ 
+  --list
+    List all known profiles
+  
+  --dmenu
+    Override location of dmenu. Rofi is autodetected without you needing to set this.
+  
+  --qutebrowser
+    Override location of qutebrowser to call.
+
+Version $QP_VERSION
+https://github.com/jtyers/qutebrowser-profile
+Written by Jonny Tyers
+Released under the MIT Licence. See LICENCE file for full licence terms.
+
+EOF
+
+set -eu
+QP_VERSION="0.0.1"
 
 die() {
   echo -e "$@" >&2
   exit 1
+}
+
+listProfiles() {
+  find "$profilesRoot" -mindepth 1 -maxdepth 1 -type d -printf "%P\n"
 }
 
 # usage: checkProfileExists <profile>
@@ -120,50 +145,79 @@ runQb() {
     ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
   fi
 
-  qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@"
+  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &>/dev/null &
 }
 
 uid=$(id -u)
 profilesRoot="/run/user/$uid/qutebrowser"
 choose=0
 onlyExisting=0
+list=0
+dmenu=""
+qutebrowser="qutebrowser"
 load=""
 new=""
 declare -a qbArgs
 
-while true; do
-  [ $# -eq 0 ] && break
+if [ $# -eq 0 ]; then
+  # if no args specified, assume --choose
+  choose=1
 
-  case $1 in
-    --choose|-c) choose=1; shift ;;
-    --only-existing|-e) onlyExisting=1; shift ;;
-    --load|-l)
-      [ $# -ge 2 ] || die "you must specify a profile to load\n\n$usage"
-      load="$2"
-      shift; shift;
-      ;;
-    --new|-n)
-      [ $# -ge 2 ] || die "you must specify a profile to create\n\n$usage"
-      new="$2";shift; shift
-      ;;
+else
+  while true; do
+    [ $# -eq 0 ] && break
 
-    --restore|-r)
-      # these are qutebrowser args that interfere with our profile management, so we filter them out
-      echo "warning: ignoring $1" >&2
-      shift; shift; # -r has a <session> arg, so skip that too
-      ;;
+    case $1 in
+      --help|-h) echo "$help"; exit 0 ;;
+      --qutebrowser) qutebrowser="$2"; shift; shift ;;
+      --dmenu) dmenu="$2"; shift; shift ;;
+      
+      --list|-l) list=1; shift ;;
+      --choose|-c) choose=1; shift ;;
+      --only-existing|-e) onlyExisting=1; shift ;;
+      --load|-p)
+        [ $# -ge 2 ] || die "you must specify a profile to load\n\n$usage"
+        load="$2"
+        shift; shift;
+        ;;
+      --new|-n)
+        [ $# -ge 2 ] || die "you must specify a profile to create\n\n$usage"
+        new="$2";shift; shift
+        ;;
 
-    --override-restore|-R)
-      # these are qutebrowser args that interfere with our profile management, so we filter them out
-      echo "warning: ignoring $1" >&2
-      shift;
-      ;;
+      --restore|-r)
+        # these are qutebrowser args that interfere with our profile management, so we filter them out
+        echo "warning: ignoring $1" >&2
+        shift; shift; # -r has a <session> arg, so skip that too
+        ;;
 
-    *) qbArgs+=("$1"); shift; ;;
-  esac
-done
+      --override-restore|-R)
+        # these are qutebrowser args that interfere with our profile management, so we filter them out
+        echo "warning: ignoring $1" >&2
+        shift;
+        ;;
 
-if [ $choose -eq 1 ]; then
+      *) qbArgs+=("$1"); shift; ;;
+    esac
+  done
+fi
+
+if [ -z "$dmenu" ]; then
+  if which rofi >/dev/null; then
+    dmenu="rofi -dmenu"
+
+  elif which dmenu >/dev/null; then
+    dmenu="dmenu"
+
+  else
+    die "neither dmenu or rofi are available on \$PATH; either install them or use --dmenu to specify manually"
+  fi
+fi
+
+if [ $list -eq 1 ]; then
+  listProfiles
+
+elif [ $choose -eq 1 ]; then
   [ -n "$new" ] && die "cannot use --choose with --new"
   [ -n "$load" ] && die "cannot use --choose with --load"
 
@@ -171,7 +225,7 @@ if [ $choose -eq 1 ]; then
   [ $onlyExisting -eq 1 ] && dmenuArgs="$dmenuArgs -no-custom"
 
   chosenProfile=$(
-    find "$profilesRoot" -mindepth 1 -maxdepth 1 -type d -printf "%P\n" | dmenu $dmenuArgs
+    listProfiles | $dmenu $dmenuArgs
   )
 
   [ -z "$chosenProfile" ] && die "no profile chosen"
