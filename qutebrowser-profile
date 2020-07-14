@@ -62,13 +62,22 @@ EOF
 set -eu
 QP_VERSION="0.0.1"
 
+# Set default values as defined in XDG base directory spec
+# https://specifications.freedesktop.org/basedir-spec/latest/
+XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+
 die() {
   echo -e "$@" >&2
   exit 1
 }
 
 listProfiles() {
-  find "$profilesRoot" -mindepth 1 -maxdepth 1 -type d -printf "%P\n"
+  # our profilesRoot may contain dirs that are not qutebrowser profiles, so we look for
+  # the 'state' file to determine whether something is a profile, and then pipe thru dirname
+  find "$profilesRoot" -mindepth 2 -maxdepth 2 -name state -type f -printf "%P\n" | xargs dirname
 }
 
 # usage: checkProfileExists <profile>
@@ -106,13 +115,6 @@ runQb() {
   #
   # Enhanced a little by jonny on a dreary cold Friday morning in December 2018.
 
-  # Set default values for the variables as defined in the XDG base directory spec
-  # (https://specifications.freedesktop.org/basedir-spec/latest/):
-  XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-  XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-  XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
-  XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-
   # Translate options: remove occurrences of -r/--restore from the list of
   # command line arguments and save the session name for later; ignore -R (TODO):
   session='default'
@@ -148,8 +150,8 @@ runQb() {
   $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &>/dev/null &
 }
 
-uid=$(id -u)
-profilesRoot="/run/user/$uid/qutebrowser"
+#uid=$(id -u)
+profilesRoot="$XDG_DATA_HOME/qutebrowser" #"/run/user/$uid/qutebrowser"
 choose=0
 onlyExisting=0
 list=0
@@ -157,6 +159,7 @@ dmenu=""
 qutebrowser="qutebrowser"
 load=""
 new=""
+rofi=0
 declare -a qbArgs
 
 if [ $# -eq 0 ]; then
@@ -205,6 +208,7 @@ fi
 if [ -z "$dmenu" ]; then
   if which rofi >/dev/null; then
     dmenu="rofi -dmenu"
+    rofi=1
 
   elif which dmenu >/dev/null; then
     dmenu="dmenu"
@@ -212,6 +216,11 @@ if [ -z "$dmenu" ]; then
   else
     die "neither dmenu or rofi are available on \$PATH; either install them or use --dmenu to specify manually"
   fi
+fi
+
+if [ $choose -eq 0 ] && [ $list -eq 0 ]; then
+  # if user chose neither --choose or --list, assume --choose
+  choose=1
 fi
 
 if [ $list -eq 1 ]; then
@@ -222,13 +231,24 @@ elif [ $choose -eq 1 ]; then
   [ -n "$load" ] && die "cannot use --choose with --load"
 
   dmenuArgs="-p qutebrowser"
+
+  [ $rofi -eq 1 ] && dmenuArgs="$dmenuArgs -mesg $qbArgs"
+
   [ $onlyExisting -eq 1 ] && dmenuArgs="$dmenuArgs -no-custom"
 
+  set +e
   chosenProfile=$(
     listProfiles | $dmenu $dmenuArgs
   )
+  set -e
 
-  [ -z "$chosenProfile" ] && die "no profile chosen"
+  if [ -z "$chosenProfile" ]; then
+    # if user chooses no profile, treat this as an intended cancellation and exit
+    # with success (zero), so xdg-open does not try other browsers thinking we failed
+    echo "no profile chosen" >&2
+    exit 0
+  fi
+
   [ $onlyExisting -eq 1 ] && checkProfileExists "$chosenProfile" # double-check
 
   runQbWithProfile "$chosenProfile"
