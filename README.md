@@ -4,7 +4,7 @@ A simple wrapper script for qutebrowser that allows you to maintain different pr
 
 ## Why?
 
-I use my system for different projects and purposes, such as *email*, *cloud development*, *web browsing* and so on. Using ``qutebrowser-profile` I can keep all of these in separate qutebrowser profiles. (I in fact also keep them in separate i3 profiles via [i3-launcher](https://github.com/jtyers/i3-launcher) too, but that's another story).
+I use my system for different projects and purposes, such as *email*, *cloud development*, *web browsing* and so on. Using `qutebrowser-profile` I can keep all of these in separate qutebrowser profiles. (I in fact also keep them in separate i3 profiles via [i3-launcher](https://github.com/jtyers/i3-launcher) too, but that's another story).
 
 ## Installation
 
