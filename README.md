@@ -34,6 +34,12 @@ Here's the full options list (also available with `--help`):
 
 USAGE
   qutebrowser-profile [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]
+  
+  --load <name>
+    Load named profile and run qutebrowser.
+    
+  --new <name>
+    Created named profile and launch qutebrowser with it. 
 
   --choose, -c
     If specified, the user is asked to select a profile via dmenu. If dmenu returns an empty string or non-zero 
@@ -47,7 +53,7 @@ USAGE
     If specified, and --choose is in operation, the user can only choose an existing profile.
  
   --list
-    List all known profiles
+    List all known profiles.
   
   --dmenu
     Override location of dmenu. Rofi is autodetected without you needing to set this.
