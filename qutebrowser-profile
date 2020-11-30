@@ -232,7 +232,7 @@ elif [ $choose -eq 1 ]; then
 
   dmenuArgs="-p qutebrowser"
 
-  [ $rofi -eq 1 ] && dmenuArgs="$dmenuArgs -mesg $qbArgs"
+  [ $rofi -eq 1 ] && dmenuArgs="$dmenuArgs -mesg ${qbArgs:-}"
 
   [ $onlyExisting -eq 1 ] && dmenuArgs="$dmenuArgs -no-custom"
 
