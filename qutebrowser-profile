@@ -94,6 +94,20 @@ runQbWithProfile() {
   runQb ${qbArgs[@]}
 }
 
+# Copy the canonical Qutebrowser .desktop file and customize it.
+createDesktopFile() {
+  profile="$1"
+  desktopFile="$XDG_DATA_HOME/applications/qutebrowser-$profile.desktop"
+  # XXX Check if this file exists and/or support other locations.
+  cp /usr/share/applications/org.qutebrowser.qutebrowser.desktop $desktopFile
+  appId="qutebrowser-$profile"
+  newExec="Exec=qutebrowser-profile "
+  newExec+="--load '$profile' "
+  sed -i "s/Exec=qutebrowser/$newExec/g;
+          s/Name=qutebrowser/Name=Qute [$profile]/;
+          s/StartupWMClass=qutebrowser/StartupWMClass=$appId/" $desktopFile
+}
+
 # usage: runQb <args>
 runQb() {
   # https://github.com/ayekat/dotfiles/blob/master/bin/qutebrowser
@@ -147,7 +161,14 @@ runQb() {
     ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
   fi
 
-  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &>/dev/null &
+  # Launch qutebrowser with a unique app ID for each profile.
+  # X11 uses the  --qt-arg name to set WM_CLASS
+  # Wayland uses --desktop-file-name to set app_id
+  # Requires Qutebrowser > 1.14.1
+  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" \
+     --desktop-file-name "qutebrowser-$session" \
+     --qt-arg       name "qutebrowser-$session" \
+    "$@" &>/dev/null &
 }
 
 #uid=$(id -u)
@@ -256,11 +277,13 @@ elif [ $choose -eq 1 ]; then
 elif [ -n "$load" ]; then
   [ -n "$new" ] && die "cannot use --load with --new"
   checkProfileExists "$load"
-  
   runQbWithProfile "$load"
 
 elif [ -n "$new" ]; then
   [ -n "$load" ] && die "cannot use --load with --new"
-  
+
+  createDesktopFile "$new"
+  echo "Qutebrowser profile '$new' created."
+
   runQbWithProfile "$new"
 fi

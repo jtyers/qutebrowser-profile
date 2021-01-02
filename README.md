@@ -1,6 +1,6 @@
 # qutebrowser-profile
 
-A simple wrapper script for qutebrowser that allows you to maintain different profiles, each with their own history and session state but sharing the same `config.py`.
+A wrapper script for qutebrowser that allows you to maintain different profiles, each with their own history and session state but sharing the same `config.py`.
 
 ## Why?
 
@@ -21,9 +21,13 @@ To create a new profile, just call the script:
 You'll get a rofi/dmenu prompt asking for a profile name. Type one in and hit enter, and qutebrowser will load your profile.
 
 Note that:
-* qutebrowser's window will have `[my-profile-name]` at the start, so you can easily distinguish different qutebrowsers loaded with different profiles
-* qutebrowser loads configuration from the normal location (and all qutebrowsers share configuration regardless of profile, this includes quickmarks/bookmarks)
-* other data, such as session history, cache, cookies, etc, will be unique to that profile
+
+ * qutebrowser's window will have `[my-profile-name]` at the start, so you can easily distinguish different qutebrowsers loaded with different profiles
+ * qutebrowser loads configuration from the normal location (and all qutebrowsers share configuration regardless of profile, this includes quickmarks/bookmarks)
+ * other data, such as session history, cache, cookies, etc, will be unique to that profile
+ * A new `.desktop` file will be created for each profile, allowing you to launch each one using a GUI launcher. Name will be "Qute [$profile]"
+ * Each profile will be treated as a unique app by the window managers because we set a unique WM\_CLASS for X11 and a unique app\_id for Wayland (requires Qutebrowser > 1.14.1).
+ * The same Qutebrowser icon is used for the new profiles, but you can reference your own by editing `~/.local/share/applications/qutebrowser-$profile.desktop`.
 
 ## Other options
 
