@@ -20,10 +20,11 @@ To create a new profile, just call the script:
 
 You'll get a rofi/dmenu prompt asking for a profile name. Type one in and hit enter, and qutebrowser will load your profile.
 
-Note that:
+## Features
 
  * qutebrowser's window will have `[my-profile-name]` at the start, so you can easily distinguish different qutebrowsers loaded with different profiles
  * qutebrowser loads configuration from the normal location (and all qutebrowsers share configuration regardless of profile, this includes quickmarks/bookmarks)
+   * If you need some profile-specific configuration like a custom downloads directory, using the `--set` option with `--new` will set these in the generated `.desktop` file.
  * other data, such as session history, cache, cookies, etc, will be unique to that profile
  * A new `.desktop` file will be created for each profile, allowing you to launch each one using a GUI launcher. Name will be "Qute [$profile]"
  * Each profile will be treated as a unique app by the window managers because we set a unique WM\_CLASS for X11 and a unique app\_id for Wayland (requires Qutebrowser > 1.14.1).
@@ -61,6 +62,10 @@ USAGE
   
   --dmenu
     Override location of dmenu. Rofi is autodetected without you needing to set this.
+
+  --set OPTION VALUE
+    When used with --new, adds `qutebrowser --set` options in generated `.desktop` file.
+    May be specified multiple times.
   
   --qutebrowser
     Override location of qutebrowser to call.

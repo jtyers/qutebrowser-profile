@@ -48,6 +48,10 @@ USAGE
   
   --dmenu
     Override location of dmenu. Rofi is autodetected without you needing to set this.
+
+  --set OPTION VALUE
+    When used with --new, sets profile-specific config options by passing through
+    the --set flags to qutebrowser. May be specified multiple times.
   
   --qutebrowser
     Override location of qutebrowser to call.
@@ -103,9 +107,17 @@ createDesktopFile() {
   appId="qutebrowser-$profile"
   newExec="Exec=qutebrowser-profile "
   newExec+="--load '$profile' "
-  sed -i "s/Exec=qutebrowser/$newExec/g;
-          s/Name=qutebrowser/Name=Qute [$profile]/;
-          s/StartupWMClass=qutebrowser/StartupWMClass=$appId/" $desktopFile
+  newExec+="${setFlags[@]}"
+
+  # Escape for sed
+  newExecEscaped=$(sed 's/[&/\]/\\&/g' <<<"$newExec")
+  profileEscaped=$(sed 's/[&/\]/\\&/g' <<<"$profile")
+    appIdEscaped=$(sed 's/[&/\]/\\&/g' <<<"$appId")
+
+
+  sed -i "s/Exec=qutebrowser/$newExecEscaped/g;
+          s/Name=qutebrowser/Name=Qute [$profileEscaped]/;
+          s/StartupWMClass=qutebrowser/StartupWMClass=$appIdEscaped/" $desktopFile
 }
 
 # usage: runQb <args>
@@ -168,6 +180,7 @@ runQb() {
   $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" \
      --desktop-file-name "qutebrowser-$session" \
      --qt-arg       name "qutebrowser-$session" \
+     ${setFlags[@]} \
     "$@" &>/dev/null &
 }
 
@@ -182,6 +195,7 @@ load=""
 new=""
 rofi=0
 declare -a qbArgs
+declare -a setFlags
 
 if [ $# -eq 0 ]; then
   # if no args specified, assume --choose
@@ -207,6 +221,13 @@ else
       --new|-n)
         [ $# -ge 2 ] || die "you must specify a profile to create\n\n$usage"
         new="$2";shift; shift
+        ;;
+
+      # For use with --new, pass --set OPTION VALUE to qutebrowser
+      # May be provided multiple times.
+      --set)
+        setFlags+=("$1 $2 $3")
+        shift; shift; shift;
         ;;
 
       --restore|-r)
