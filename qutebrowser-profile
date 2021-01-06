@@ -107,7 +107,7 @@ createDesktopFile() {
   appId="qutebrowser-$profile"
   newExec="Exec=qutebrowser-profile "
   newExec+="--load '$profile' "
-  newExec+="${setFlags[@]}"
+  newExec+=$setFlags
 
   # Escape for sed
   newExecEscaped=$(sed 's/[&/\]/\\&/g' <<<"$newExec")
@@ -176,11 +176,11 @@ runQb() {
   # Launch qutebrowser with a unique app ID for each profile.
   # X11 uses the  --qt-arg name to set WM_CLASS
   # Wayland uses --desktop-file-name to set app_id
-  # Requires Qutebrowser > 1.14.1
+  # Requires Qutebrowser > 1.14.1 and Bash 4.4
   $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" \
      --desktop-file-name "qutebrowser-$session" \
      --qt-arg       name "qutebrowser-$session" \
-     ${setFlags[@]} \
+     $setFlags \
     "$@" &>/dev/null &
 }
 
@@ -195,7 +195,7 @@ load=""
 new=""
 rofi=0
 declare -a qbArgs
-declare -a setFlags
+setFlags=''
 
 if [ $# -eq 0 ]; then
   # if no args specified, assume --choose
@@ -222,11 +222,13 @@ else
         [ $# -ge 2 ] || die "you must specify a profile to create\n\n$usage"
         new="$2";shift; shift
         ;;
-
+     
       # For use with --new, pass --set OPTION VALUE to qutebrowser
       # May be provided multiple times.
       --set)
-        setFlags+=("$1 $2 $3")
+       # TODO: Fix the quoting here
+        #setFlags+=$(printf "%q %q '%q'\n" "$1" "$2" "$3")
+        setFlags+=$(printf '%s %s "%s" ' "$1" "$2" "$3")
         shift; shift; shift;
         ;;
 
