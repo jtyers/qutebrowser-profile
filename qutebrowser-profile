@@ -129,6 +129,7 @@ runQb() {
   # $XDG_RUNTIME_DIR/qutebrowser/$session/data → $XDG_DATA_HOME/qutebrowser/$session
   # $XDG_RUNTIME_DIR/qutebrowser/$session/data/userscripts → $XDG_DATA_HOME/qutebrowser/userscripts
   # $XDG_RUNTIME_DIR/qutebrowser/$session/data/greasemonkey → $XDG_DATA_HOME/qutebrowser/greasemonkey
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/data/qtwebengine_dictionaries → $XDG_DATA_HOME/qutebrowser/qtwebengine_dictionaries
   # $XDG_RUNTIME_DIR/qutebrowser/$session/config → $XDG_CONFIG_HOME/qutebrowser
   # $XDG_RUNTIME_DIR/qutebrowser/$session/runtime (no symlink, regular directory)
   #
@@ -175,6 +176,7 @@ runQb() {
     ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
     ln -fsT "$XDG_DATA_HOME/qutebrowser/userscripts" "$basedir/data/userscripts"
     ln -fsT "$XDG_DATA_HOME/qutebrowser/greasemonkey" "$basedir/data/greasemonkey"
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/qtwebengine_dictionaries" "$basedir/data/qtwebengine_dictionaries"
   fi
 
   # Launch qutebrowser with a unique app ID for each profile.
