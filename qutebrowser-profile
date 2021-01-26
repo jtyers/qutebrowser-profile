@@ -48,6 +48,10 @@ USAGE
   
   --dmenu
     Override location of dmenu. Rofi is autodetected without you needing to set this.
+
+  --set OPTION VALUE
+    When used with --new, sets profile-specific config options by passing through
+    the --set flags to qutebrowser. May be specified multiple times.
   
   --qutebrowser
     Override location of qutebrowser to call.
@@ -94,6 +98,28 @@ runQbWithProfile() {
   runQb ${qbArgs[@]}
 }
 
+# Copy the canonical Qutebrowser .desktop file and customize it.
+createDesktopFile() {
+  profile="$1"
+  desktopFile="$XDG_DATA_HOME/applications/qutebrowser-$profile.desktop"
+  # XXX Check if this file exists and/or support other locations.
+  cp /usr/share/applications/org.qutebrowser.qutebrowser.desktop $desktopFile
+  appId="qutebrowser-$profile"
+  newExec="Exec=qutebrowser-profile "
+  newExec+="--load '$profile' "
+  newExec+=$setFlags
+
+  # Escape for sed
+  newExecEscaped=$(sed 's/[&/\]/\\&/g' <<<"$newExec")
+  profileEscaped=$(sed 's/[&/\]/\\&/g' <<<"$profile")
+    appIdEscaped=$(sed 's/[&/\]/\\&/g' <<<"$appId")
+
+
+  sed -i "s/Exec=qutebrowser/$newExecEscaped/g;
+          s/Name=qutebrowser/Name=Qute [$profileEscaped]/;
+          s/StartupWMClass=qutebrowser/StartupWMClass=$appIdEscaped/" $desktopFile
+}
+
 # usage: runQb <args>
 runQb() {
   # https://github.com/ayekat/dotfiles/blob/master/bin/qutebrowser
@@ -101,6 +127,9 @@ runQb() {
   
   # $XDG_RUNTIME_DIR/qutebrowser/$session/cache → $XDG_CACHE_HOME/qutebrowser/$session
   # $XDG_RUNTIME_DIR/qutebrowser/$session/data → $XDG_DATA_HOME/qutebrowser/$session
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/data/userscripts → $XDG_DATA_HOME/qutebrowser/userscripts
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/data/greasemonkey → $XDG_DATA_HOME/qutebrowser/greasemonkey
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/data/qtwebengine_dictionaries → $XDG_DATA_HOME/qutebrowser/qtwebengine_dictionaries
   # $XDG_RUNTIME_DIR/qutebrowser/$session/config → $XDG_CONFIG_HOME/qutebrowser
   # $XDG_RUNTIME_DIR/qutebrowser/$session/runtime (no symlink, regular directory)
   #
@@ -145,9 +174,20 @@ runQb() {
     ln -fsT "$XDG_CONFIG_HOME/qutebrowser" "$basedir/config"
     ln -fsT "$XDG_CACHE_HOME/qutebrowser/$session" "$basedir/cache"
     ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/userscripts" "$basedir/data/userscripts"
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/greasemonkey" "$basedir/data/greasemonkey"
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/qtwebengine_dictionaries" "$basedir/data/qtwebengine_dictionaries"
   fi
 
-  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &>/dev/null &
+  # Launch qutebrowser with a unique app ID for each profile.
+  # X11 uses the  --qt-arg name to set WM_CLASS
+  # Wayland uses --desktop-file-name to set app_id
+  # Requires Qutebrowser > 1.14.1 and Bash 4.4
+  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" \
+     --desktop-file-name "qutebrowser-$session" \
+     --qt-arg       name "qutebrowser-$session" \
+     $setFlags \
+    "$@" &>/dev/null &
 }
 
 #uid=$(id -u)
@@ -161,6 +201,7 @@ load=""
 new=""
 rofi=0
 declare -a qbArgs
+setFlags=''
 
 if [ $# -eq 0 ]; then
   # if no args specified, assume --choose
@@ -186,6 +227,15 @@ else
       --new|-n)
         [ $# -ge 2 ] || die "you must specify a profile to create\n\n$usage"
         new="$2";shift; shift
+        ;;
+     
+      # For use with --new, pass --set OPTION VALUE to qutebrowser
+      # May be provided multiple times.
+      --set)
+       # TODO: Fix the quoting here
+        #setFlags+=$(printf "%q %q '%q'\n" "$1" "$2" "$3")
+        setFlags+=$(printf '%s %s "%s" ' "$1" "$2" "$3")
+        shift; shift; shift;
         ;;
 
       --restore|-r)
@@ -218,7 +268,7 @@ if [ -z "$dmenu" ]; then
   fi
 fi
 
-if [ -z "$new" ] && [ $choose -eq 0 ] && [ $list -eq 0 ]; then
+if [ -z "$new" ] && [ -z "$load" ] && [ $choose -eq 0 ] && [ $list -eq 0 ]; then
   # if user chose neither --choose or --list, assume --choose
   choose=1
 fi
@@ -256,11 +306,13 @@ elif [ $choose -eq 1 ]; then
 elif [ -n "$load" ]; then
   [ -n "$new" ] && die "cannot use --load with --new"
   checkProfileExists "$load"
-  
   runQbWithProfile "$load"
 
 elif [ -n "$new" ]; then
   [ -n "$load" ] && die "cannot use --load with --new"
-  
+
+  createDesktopFile "$new"
+  echo "Qutebrowser profile '$new' created."
+
   runQbWithProfile "$new"
 fi
