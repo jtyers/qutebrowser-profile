@@ -60,7 +60,7 @@ Released under the MIT Licence. See LICENCE file for full licence terms.
 EOF
 
 set -eu
-QP_VERSION="0.0.2"
+QP_VERSION="0.0.1"
 
 # Set default values as defined in XDG base directory spec
 # https://specifications.freedesktop.org/basedir-spec/latest/
