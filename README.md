@@ -12,6 +12,14 @@ Clone this repository and add it to your `$PATH`.
 
 The script depends on `dmenu`. Rofi is also supported and automatically used if available. You can also override, e.g. `--dmenu="rofi -dmenu"`.
 
+### Arch Linux
+
+There is a [package](https://aur.archlinux.org/packages/qutebrowser-profile-git/) available in the AUR:
+
+```
+yay qutebrowser-profile-git
+```
+
 ## Getting started
 
 To create a new profile, just call the script:

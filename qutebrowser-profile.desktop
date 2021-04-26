@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=qutebrowser-profile
 Comment=Open with qutebrowser-profile
-Exec=/home/jonny/github/qutebrowser-profile/qutebrowser-profile --choose %U
+Exec=qutebrowser-profile --choose %U
 Type=Application
 Categories=Network;WebBrowser;
 
