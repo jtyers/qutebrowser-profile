@@ -1,19 +1,19 @@
 #!/bin/bash
 
 # MIT License
-# 
+#
 # Copyright (c) 2020 jtyers, ayekat
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -36,19 +36,19 @@ USAGE
     If specified, the user is asked to select a profile via dmenu. If dmenu returns an empty string or non-zero 
     exit code (eg user pressed escape instead of choosing an option) the operation is aborted and qutebrowser 
     is not opened.
- 
+
     The user can choose any existing profile or type the name of a new profile into dmenu to load qutebrowser
     in a new profile. See --only-existing below to restrict this.
- 
+
   --only-existing, -e
     If specified, and --choose is in operation, the user can only choose an existing profile.
- 
+
   --list
     List all known profiles
-  
+
   --dmenu
     Override location of dmenu. Rofi is autodetected without you needing to set this.
-  
+
   --qutebrowser
     Override location of qutebrowser to call.
 
@@ -99,8 +99,8 @@ runQb() {
   # https://github.com/ayekat/dotfiles/blob/master/bin/qutebrowser
   # https://wiki.archlinux.org/index.php/Qutebrowser#dwb-like_session_handling
   
-  # $XDG_RUNTIME_DIR/qutebrowser/$session/cache → $XDG_CACHE_HOME/qutebrowser/$session
-  # $XDG_RUNTIME_DIR/qutebrowser/$session/data → $XDG_DATA_HOME/qutebrowser/$session
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/cache → $XDG_CACHE_HOME/qutebrowser/profiles/$session
+  # $XDG_RUNTIME_DIR/qutebrowser/$session/data → $XDG_DATA_HOME/qutebrowser/profiles/$session
   # $XDG_RUNTIME_DIR/qutebrowser/$session/config → $XDG_CONFIG_HOME/qutebrowser
   # $XDG_RUNTIME_DIR/qutebrowser/$session/runtime (no symlink, regular directory)
   #
@@ -134,24 +134,24 @@ runQb() {
   # Set up session base directory, unless --basedir has been specified by the
   # user:
   if [ $basedir_specified -eq 0 ]; then
-    basedir="$XDG_RUNTIME_DIR/qutebrowser/$session"
+    basedir="$XDG_RUNTIME_DIR/qutebrowser/profiles/$session"
     set -- --basedir "$basedir" "$@"
     mkdir -p \
       "$basedir" \
       "$XDG_CONFIG_HOME/qutebrowser" \
-      "$XDG_CACHE_HOME/qutebrowser/$session" \
-      "$XDG_DATA_HOME/qutebrowser/$session" \
+      "$XDG_CACHE_HOME/qutebrowser/profiles/$session" \
+      "$XDG_DATA_HOME/qutebrowser/profiles/$session" \
       "$basedir/runtime"
     ln -fsT "$XDG_CONFIG_HOME/qutebrowser" "$basedir/config"
-    ln -fsT "$XDG_CACHE_HOME/qutebrowser/$session" "$basedir/cache"
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
+    ln -fsT "$XDG_CACHE_HOME/qutebrowser/profiles/$session" "$basedir/cache"
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/profiles/$session" "$basedir/data"
   fi
 
   $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &>/dev/null &
 }
 
 #uid=$(id -u)
-profilesRoot="$XDG_DATA_HOME/qutebrowser" #"/run/user/$uid/qutebrowser"
+profilesRoot="$XDG_DATA_HOME/qutebrowser/profiles" #"/run/user/$uid/qutebrowser"
 choose=0
 onlyExisting=0
 list=0
@@ -161,6 +161,8 @@ load=""
 new=""
 rofi=0
 declare -a qbArgs
+
+mkdir -p $profilesRoot
 
 if [ $# -eq 0 ]; then
   # if no args specified, assume --choose
@@ -174,7 +176,7 @@ else
       --help|-h) echo "$help"; exit 0 ;;
       --qutebrowser) qutebrowser="$2"; shift; shift ;;
       --dmenu) dmenu="$2"; shift; shift ;;
-      
+
       --list|-l) list=1; shift ;;
       --choose|-c) choose=1; shift ;;
       --only-existing|-e) onlyExisting=1; shift ;;
@@ -256,11 +258,11 @@ elif [ $choose -eq 1 ]; then
 elif [ -n "$load" ]; then
   [ -n "$new" ] && die "cannot use --load with --new"
   checkProfileExists "$load"
-  
+
   runQbWithProfile "$load"
 
 elif [ -n "$new" ]; then
   [ -n "$load" ] && die "cannot use --load with --new"
-  
+
   runQbWithProfile "$new"
 fi
