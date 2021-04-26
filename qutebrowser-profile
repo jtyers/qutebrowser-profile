@@ -23,14 +23,17 @@
 # SOFTWARE.
 #
 
+QP_NAME="qutebrowser-profile"
+QP_VERSION="0.0.1"
+
 # Wrapper for qutebrowser that allows the user to maintain different profiles for qutebrowser
 #
-usage="qutebrowser-profile [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]"
+usage="$QP_NAME [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]"
 read -r -d '' help <<EOF
-  qutebrowser-profile - use qutebrowser with per-profile cache, session history, etc
+  $QP_NAME - use qutebrowser with per-profile cache, session history, etc
 
 USAGE
-  qutebrowser-profile [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]
+  $QP_NAME [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]
 
   --choose, -c
     If specified, the user is asked to select a profile via dmenu. If dmenu returns an empty string or non-zero 
@@ -64,7 +67,6 @@ Released under the MIT Licence. See LICENCE file for full licence terms.
 EOF
 
 set -eu
-QP_VERSION="0.0.1"
 
 # Set default values as defined in XDG base directory spec
 # https://specifications.freedesktop.org/basedir-spec/latest/
@@ -101,22 +103,22 @@ runQbWithProfile() {
 # Copy the canonical Qutebrowser .desktop file and customize it.
 createDesktopFile() {
   profile="$1"
-  desktopFile="$XDG_DATA_HOME/applications/qutebrowser-$profile.desktop"
+  desktopFile="$XDG_DATA_HOME/applications/${QP_NAME}-${profile}.desktop"
   # XXX Check if this file exists and/or support other locations.
   cp /usr/share/applications/org.qutebrowser.qutebrowser.desktop $desktopFile
-  appId="qutebrowser-$profile"
-  newExec="Exec=qutebrowser-profile "
+  appId="${QP_NAME}-${profile}"
+  newExec="Exec=$QP_NAME "
   newExec+="--load '$profile' "
   newExec+=$setFlags
 
   # Escape for sed
   newExecEscaped=$(sed 's/[&/\]/\\&/g' <<<"$newExec")
   profileEscaped=$(sed 's/[&/\]/\\&/g' <<<"$profile")
-    appIdEscaped=$(sed 's/[&/\]/\\&/g' <<<"$appId")
+  appIdEscaped=$(sed 's/[&/\]/\\&/g' <<<"$appId")
 
 
   sed -i "s/Exec=qutebrowser/$newExecEscaped/g;
-          s/Name=qutebrowser/Name=Qute [$profileEscaped]/;
+          s/Name=qutebrowser/Name=$QP_NAME [$profileEscaped]/;
           s/StartupWMClass=qutebrowser/StartupWMClass=$appIdEscaped/" $desktopFile
 }
 
@@ -183,9 +185,9 @@ runQb() {
   # X11 uses the  --qt-arg name to set WM_CLASS
   # Wayland uses --desktop-file-name to set app_id
   # Requires Qutebrowser > 1.14.1 and Bash 4.4
-  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" \
-     --desktop-file-name "qutebrowser-$session" \
-     --qt-arg       name "qutebrowser-$session" \
+  $qutebrowser --set window.title_format "{perc}$QP_NAME [${session}]{title_sep}{current_title}" \
+     --desktop-file-name "${QP_NAME}-$session" \
+     --qt-arg       name "${QP_NAME}-$session" \
      $setFlags \
     "$@" &>/dev/null &
 }
@@ -312,7 +314,7 @@ elif [ -n "$new" ]; then
   [ -n "$load" ] && die "cannot use --load with --new"
 
   createDesktopFile "$new"
-  echo "Qutebrowser profile '$new' created."
+  echo "qutebrowser profile '$new' created."
 
   runQbWithProfile "$new"
 fi
