@@ -173,12 +173,19 @@ runQb() {
       "$XDG_CACHE_HOME/qutebrowser/$session" \
       "$XDG_DATA_HOME/qutebrowser/$session" \
       "$basedir/runtime"
+
     ln -fsT "$XDG_CONFIG_HOME/qutebrowser" "$basedir/config"
     ln -fsT "$XDG_CACHE_HOME/qutebrowser/$session" "$basedir/cache"
     ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/userscripts" "$basedir/data/userscripts"
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/greasemonkey" "$basedir/data/greasemonkey"
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/qtwebengine_dictionaries" "$basedir/data/qtwebengine_dictionaries"
+
+    errorMsg="Profile %s already has its own %s directory. You will need to merge this manually into $HOME/.local/share/qutebrowser/"
+
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/userscripts" "$basedir/data/userscripts" \
+      || warningMessage $(printf "$errorMsg" $session userscripts)
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/greasemonkey" "$basedir/data/greasemonkey" \
+      || warningMessage $(printf "$errorMsg" $session greasemonkey)
+    ln -fsT "$XDG_DATA_HOME/qutebrowser/qtwebengine_dictionaries" "$basedir/data/qtwebengine_dictionaries" \
+      || warningMessage $(printf "$errorMsg" $session qtwebengine_dictionaries)
   fi
 
   # Launch qutebrowser with a unique app ID for each profile.
@@ -190,6 +197,21 @@ runQb() {
      --qt-arg       name "${QP_NAME}-$session" \
      $setFlags \
     "$@" &>/dev/null &
+}
+
+# show a warning message, without exiting
+warningMessage() {
+  msg="$@"
+  if $(which zenity &>/dev/null); then
+    zenity --warning --title "$QP_NAME" --text "$msg"
+
+  elif $(which notify-send &>/dev/null); then
+    notify-send -a "$QP_NAME" -i dialog-warning "$QP_NAME: error" "$msg"
+
+  fi
+  
+  # always echo to stderr, in case GUI dialogs don't work/aren't noticed
+  echo "$msg" >&2 
 }
 
 #uid=$(id -u)
