@@ -122,6 +122,19 @@ createDesktopFile() {
           s/StartupWMClass=qutebrowser/StartupWMClass=$appIdEscaped/" $desktopFile
 }
 
+# Create a symlink from <srcdir> to <dstdir>. If dstdir exists, remove it if empty.
+# usage: linkDirIntelligently <srcdir> <dstdir>
+linkDirIntelligently() {
+  srcdir="$1"
+  dstdir="$2"
+
+  if [ ! -L "$dstdir" ] && [ -d "$dstdir" ] && [ -n "$(ls -a $dstdir)" ]; then
+    rmdir $dstdir
+  fi
+
+  ln -fsT "$srcdir" "$dstdir"
+}
+
 # usage: runQb <args>
 runQb() {
   # https://github.com/ayekat/dotfiles/blob/master/bin/qutebrowser
@@ -174,19 +187,21 @@ runQb() {
       "$XDG_DATA_HOME/qutebrowser/$session" \
       "$basedir/runtime"
 
-    ln -fsT "$XDG_CONFIG_HOME/qutebrowser" "$basedir/config"
-    ln -fsT "$XDG_CACHE_HOME/qutebrowser/$session" "$basedir/cache"
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
+    linkDirIntelligently "$XDG_CONFIG_HOME/qutebrowser" "$basedir/config"
+    linkDirIntelligently "$XDG_CACHE_HOME/qutebrowser/$session" "$basedir/cache"
+    linkDirIntelligently "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
 
     errorMsg="Profile %s already has its own %s directory. You will need to merge this manually into $HOME/.local/share/qutebrowser/"
 
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/userscripts" "$basedir/data/userscripts" \
+    linkDirIntelligently "$XDG_DATA_HOME/qutebrowser/userscripts" "$basedir/data/userscripts" \
       || warningMessage $(printf "$errorMsg" $session userscripts)
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/greasemonkey" "$basedir/data/greasemonkey" \
+    linkDirIntelligently "$XDG_DATA_HOME/qutebrowser/greasemonkey" "$basedir/data/greasemonkey" \
       || warningMessage $(printf "$errorMsg" $session greasemonkey)
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/qtwebengine_dictionaries" "$basedir/data/qtwebengine_dictionaries" \
+    linkDirIntelligently "$XDG_DATA_HOME/qutebrowser/qtwebengine_dictionaries" "$basedir/data/qtwebengine_dictionaries" \
       || warningMessage $(printf "$errorMsg" $session qtwebengine_dictionaries)
   fi
+
+  echo "using basedir $basedir"
 
   # Launch qutebrowser with a unique app ID for each profile.
   # X11 uses the  --qt-arg name to set WM_CLASS
