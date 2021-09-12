@@ -147,7 +147,7 @@ runQb() {
     ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
   fi
 
-  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &>/dev/null &
+  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &
 }
 
 #uid=$(id -u)
