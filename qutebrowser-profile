@@ -218,7 +218,7 @@ if [ -z "$dmenu" ]; then
   fi
 fi
 
-if [ -z "$new" ] && [ $choose -eq 0 ] && [ $list -eq 0 ]; then
+if [ -z "$load" ] && [ -z "$new" ] && [ $choose -eq 0 ] && [ $list -eq 0 ]; then
   # if user chose neither --choose or --list, assume --choose
   choose=1
 fi
