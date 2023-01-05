@@ -39,6 +39,12 @@ USAGE
  
     The user can choose any existing profile or type the name of a new profile into dmenu to load qutebrowser
     in a new profile. See --only-existing below to restrict this.
+
+  --allow-no-profile, -np SLOTNAME
+    If specified, a special choice option will be provided that launches qutebrowser without applying any profiles.
+    This is effectively identical to launching qutebrowser directly! No effect with --new option.
+
+    SLOTNAME is an optional parameter that controls the name to be used for this special choice option (default: "default").
  
   --only-existing, -e
     If specified, and --choose is in operation, the user can only choose an existing profile.
@@ -77,6 +83,9 @@ die() {
 listProfiles() {
   # our profilesRoot may contain dirs that are not qutebrowser profiles, so we look for
   # the 'state' file to determine whether something is a profile, and then pipe thru dirname
+  if [ $allowNoProfile -eq 1 ]; then
+    echo "$noProfileName"
+  fi
   find "$profilesRoot" -mindepth 2 -maxdepth 2 -name state -type f -printf "%P\n" | xargs dirname
 }
 
@@ -150,9 +159,16 @@ runQb() {
   $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &>/dev/null &
 }
 
+runQbNoProfile() {
+  echo "launching without any profile"
+  $qutebrowser ${qbArgs[@]} &>/dev/null &
+}
+
 #uid=$(id -u)
 profilesRoot="$XDG_DATA_HOME/qutebrowser" #"/run/user/$uid/qutebrowser"
 choose=0
+allowNoProfile=0
+noProfileName="default"
 onlyExisting=0
 list=0
 dmenu=""
@@ -177,6 +193,14 @@ else
       
       --list|-l) list=1; shift ;;
       --choose|-c) choose=1; shift ;;
+      --allow-no-profile|-np)
+        allowNoProfile=1
+        if [ $# -ge 2 ] && [ "$2" = "${2#--}" ]; then
+          noProfileName="$2"
+          shift;
+        fi
+        shift;
+        ;;
       --only-existing|-e) onlyExisting=1; shift ;;
       --load|-p)
         [ $# -ge 2 ] || die "you must specify a profile to load\n\n$usage"
@@ -249,15 +273,21 @@ elif [ $choose -eq 1 ]; then
     exit 0
   fi
 
-  [ $onlyExisting -eq 1 ] && checkProfileExists "$chosenProfile" # double-check
-
-  runQbWithProfile "$chosenProfile"
+  if [ $allowNoProfile -eq 1 ] && [ "$chosenProfile" = "$noProfileName" ] ; then
+    runQbNoProfile
+  else
+    [ $onlyExisting -eq 1 ] && checkProfileExists "$chosenProfile" # double-check
+    runQbWithProfile "$chosenProfile"
+  fi
 
 elif [ -n "$load" ]; then
-  [ -n "$new" ] && die "cannot use --load with --new"
-  checkProfileExists "$load"
-  
-  runQbWithProfile "$load"
+  if [ $allowNoProfile -eq 1 ] && [ "$load" = "$noProfileName" ] ; then
+    runQbNoProfile
+  else
+    [ -n "$new" ] && die "cannot use --load with --new"
+    checkProfileExists "$load"
+    runQbWithProfile "$load"
+  fi
 
 elif [ -n "$new" ]; then
   [ -n "$load" ] && die "cannot use --load with --new"
