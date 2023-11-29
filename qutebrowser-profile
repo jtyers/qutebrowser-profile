@@ -1,19 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 # MIT License
-# 
-# Copyright (c) 2020 jtyers, ayekat
-# 
+#
+# Copyright (c) 2018-2023 Jonny Tyers
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,246 +21,353 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-#
 
-# Wrapper for qutebrowser that allows the user to maintain different profiles for qutebrowser
-#
-usage="qutebrowser-profile [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]"
-read -r -d '' help <<EOF
-  qutebrowser-profile - use qutebrowser with per-profile cache, session history, etc
+from __future__ import annotations
+from attrs import define
+import click
+import os
+import subprocess
+import shlex
+import shutil
+from typing import Generator
+from typing import Optional
 
-USAGE
-  qutebrowser-profile [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]
+def expand(path):
+    if path is None:
+        return None
 
-  --choose, -c
-    If specified, the user is asked to select a profile via dmenu. If dmenu returns an empty string or non-zero 
-    exit code (eg user pressed escape instead of choosing an option) the operation is aborted and qutebrowser 
-    is not opened.
- 
-    The user can choose any existing profile or type the name of a new profile into dmenu to load qutebrowser
-    in a new profile. See --only-existing below to restrict this.
- 
-  --only-existing, -e
-    If specified, and --choose is in operation, the user can only choose an existing profile.
- 
-  --list
-    List all known profiles
-  
-  --dmenu
-    Override location of dmenu. Rofi is autodetected without you needing to set this.
-  
-  --qutebrowser
-    Override location of qutebrowser to call.
+    if type(path) is list:
+        return [os.path.expanduser(os.path.expandvars(x)) for x in path]
 
-Version $QP_VERSION
-https://github.com/jtyers/qutebrowser-profile
-Written by Jonny Tyers
-Released under the MIT Licence. See LICENCE file for full licence terms.
+    elif type(path) is str:
+        return " ".join(expand(path.split(" ")))
 
-EOF
+    else:
+        return os.path.expanduser(os.path.expandvars(path))
 
-set -eu
-QP_VERSION="0.0.1"
 
-# Set default values as defined in XDG base directory spec
-# https://specifications.freedesktop.org/basedir-spec/latest/
-XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
-XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+xdg_runtime_dir = os.environ.get(
+    "XDG_RUNTIME_DIR", expand(f"/run/user/{os.getuid()}")
+)
+xdg_config_home = os.environ.get("XDG_CONFIG_HOME", expand("$HOME/.config"))
+xdg_cache_home = os.environ.get("XDG_CACHE_HOME", expand("$HOME/.cache"))
+xdg_data_home = os.environ.get("XDG_DATA_HOME", expand("$HOME/.local/share"))
 
-die() {
-  echo -e "$@" >&2
-  exit 1
-}
+@define
+class NoSuchProfileError(Exception):
+    profile_name: str
 
-listProfiles() {
-  # our profilesRoot may contain dirs that are not qutebrowser profiles, so we look for
-  # the 'state' file to determine whether something is a profile, and then pipe thru dirname
-  find "$profilesRoot" -mindepth 2 -maxdepth 2 -name state -type f -printf "%P\n" | xargs dirname
-}
+@define
+class ProfileAlreadyExistsError(Exception):
+    profile_name: str
 
-# usage: checkProfileExists <profile>
-checkProfileExists() {
-  profile="$1"
-  [ -d "$profilesRoot/$profile" ] || die "profile $profile does not exist"
-}
+@define
+class QutebrowserProfile:
+    parent: QutebrowserProfiles
+    profile_name: str
+    session: str = 'default'
 
-# usage: runQbWithProfile <profile>
-runQbWithProfile() {
-  profile="$1"
-  qbArgs+=("-r" "$profile")
+    @property
+    def basedir(self):
+        return os.path.join(f"{self.parent.xdg_runtime_dir}/qutebrowser/{self.profile_name}")
 
-  runQb ${qbArgs[@]}
-}
+    def mkbasedir(self):
+        # https://github.com/ayekat/localdir/blob/35fa033fb1274807c907a4a83431d3a8222283f6/lib/dotfiles/wrappers/qutebrowser
+        # https://wiki.archlinux.org/index.php/Qutebrowser#dwb-like_session_handling
+        #
+        # Wrapper around qutebrowser that makes sessions (-r, --restore SESSION) behave
+        # like they used to in dwb.
+        #
+        # We do so by filtering out the -r/--restore option passed to qutebrowser and
+        # using the argument to set up the following directory structure and symbolic
+        # links:
+        #
+        # $XDG_RUNTIME_DIR/qutebrowser/$session/cache → $XDG_CACHE_HOME/qutebrowser/$session
+        # $XDG_RUNTIME_DIR/qutebrowser/$session/data → $XDG_STATE_HOME/qutebrowser/$session
+        # $XDG_RUNTIME_DIR/qutebrowser/$session/data/userscripts → $XDG_DATA_HOME/qutebrowser/userscripts
+        # $XDG_RUNTIME_DIR/qutebrowser/$session/config → $XDG_CONFIG_HOME/qutebrowser
+        # $XDG_RUNTIME_DIR/qutebrowser/$session/runtime (no symlink, regular directory)
+        #
+        # We then specify $XDG_RUNTIME_DIR/qutebrowser/$session as a --basedir, and the
+        # files will end up in their intended locations (notice how the config directory
+        # is the same for all sessions, as there is no point in keeping it separate).
+        #
+        # DISCLAIMER: The author of this script manages all his configuration files
+        # manually, so this wrapper script has not been tested for the use case where
+        # qutebrowser itself writes to these files (and more importantly, if multiple
+        # such "sessions" simultaneously write to the same configuration file).
+        #
+        # YOU HAVE BEEN WARNED.
+        #
+        # Written by ayekat in an burst of nostalgy, on a mildly cold wednesday night in
+        # February 2017.
+        #
+        # Enhanced a little by jonny on a dreary cold Friday morning in December 2018.
+        #
 
-# usage: runQb <args>
-runQb() {
-  # https://github.com/ayekat/dotfiles/blob/master/bin/qutebrowser
-  # https://wiki.archlinux.org/index.php/Qutebrowser#dwb-like_session_handling
-  
-  # $XDG_RUNTIME_DIR/qutebrowser/$session/cache → $XDG_CACHE_HOME/qutebrowser/$session
-  # $XDG_RUNTIME_DIR/qutebrowser/$session/data → $XDG_DATA_HOME/qutebrowser/$session
-  # $XDG_RUNTIME_DIR/qutebrowser/$session/config → $XDG_CONFIG_HOME/qutebrowser
-  # $XDG_RUNTIME_DIR/qutebrowser/$session/runtime (no symlink, regular directory)
-  #
-  # We then specify $XDG_RUNTIME_DIR/qutebrowser/$session as a --basedir, and the
-  # files will end up in their intended locations (notice how the config directory
-  # is the same for all sessions, as there is no point in keeping it separate).
-  #
-  # YOU HAVE BEEN WARNED.
-  #
-  # Written by ayekat in an burst of nostalgy, on a mildly cold wednesday night in
-  # February 2017.
-  #
-  # Enhanced a little by jonny on a dreary cold Friday morning in December 2018.
+        for d in [
+            self.basedir,
+            f"{self.parent.xdg_config_home}/qutebrowser",
+            f"{self.parent.xdg_cache_home}/qutebrowser/{self.profile_name}",
+            f"{self.parent.xdg_data_home}/qutebrowser/{self.profile_name}",
+            f"{self.basedir}/runtime",
+        ]:
+            os.makedirs(d, exist_ok=True)
 
-  # Translate options: remove occurrences of -r/--restore from the list of
-  # command line arguments and save the session name for later; ignore -R (TODO):
-  session='default'
-  basedir_specified=0
-  opts_read=0
-  while [ $opts_read -lt $# ]; do
-    opt="$1" && shift
-    case "$opt" in
-      (--basedir) basedir_specified=1 ;;
-      (-r|-[!-]*r|--restore) test $# -gt 0 && session="$1" && shift && continue ;;
-      (-R) continue ;; # TODO
-    esac
-    set -- "$@" "$opt"
-    opts_read=$((opts_read + 1))
-  done
+        for src, dst in [
+            (f"{self.parent.xdg_config_home}/qutebrowser", f"{self.basedir}/config"),
+            (f"{self.parent.xdg_cache_home}/qutebrowser/{self.profile_name}", f"{self.basedir}/cache"),
+            (f"{self.parent.xdg_data_home}/qutebrowser/{self.profile_name}", f"{self.basedir}/data"),
+        ]:
+            if os.path.exists(dst):
+                os.unlink(dst)
+            os.symlink(src, dst, target_is_directory=False)
 
-  # Set up session base directory, unless --basedir has been specified by the
-  # user:
-  if [ $basedir_specified -eq 0 ]; then
-    basedir="$XDG_RUNTIME_DIR/qutebrowser/$session"
-    set -- --basedir "$basedir" "$@"
-    mkdir -p \
-      "$basedir" \
-      "$XDG_CONFIG_HOME/qutebrowser" \
-      "$XDG_CACHE_HOME/qutebrowser/$session" \
-      "$XDG_DATA_HOME/qutebrowser/$session" \
-      "$basedir/runtime"
-    ln -fsT "$XDG_CONFIG_HOME/qutebrowser" "$basedir/config"
-    ln -fsT "$XDG_CACHE_HOME/qutebrowser/$session" "$basedir/cache"
-    ln -fsT "$XDG_DATA_HOME/qutebrowser/$session" "$basedir/data"
-  fi
+@define
+class QutebrowserProfiles:
+    profiles_root: str
 
-  $qutebrowser --set window.title_format "{perc}qute [${session}]{title_sep}{current_title}" "$@" &>/dev/null &
-}
+    xdg_runtime_dir: str
+    xdg_cache_home: str
+    xdg_data_home: str
+    xdg_config_home: str
 
-#uid=$(id -u)
-profilesRoot="$XDG_DATA_HOME/qutebrowser" #"/run/user/$uid/qutebrowser"
-choose=0
-onlyExisting=0
-list=0
-dmenu=""
-qutebrowser="qutebrowser"
-load=""
-new=""
-rofi=0
-declare -a qbArgs
+    _profiles: Optional[list[QutebrowserProfile]] = None
 
-if [ $# -eq 0 ]; then
-  # if no args specified, assume --choose
-  choose=1
+    def _populate_profiles(self) -> list[QutebrowserProfile]:
+        """Populates _profiles if needed, then returns them."""
+        if self._profiles is None:
+            self._profiles = []
+            for item in os.listdir(self.profiles_root):
+                if self._exists(item):
+                    self._profiles.append(QutebrowserProfile(parent=self, profile_name=item))
 
-else
-  while true; do
-    [ $# -eq 0 ] && break
+        return self._profiles
 
-    case $1 in
-      --help|-h) echo "$help"; exit 0 ;;
-      --qutebrowser) qutebrowser="$2"; shift; shift ;;
-      --dmenu) dmenu="$2"; shift; shift ;;
-      
-      --list|-l) list=1; shift ;;
-      --choose|-c) choose=1; shift ;;
-      --only-existing|-e) onlyExisting=1; shift ;;
-      --load|-p)
-        [ $# -ge 2 ] || die "you must specify a profile to load\n\n$usage"
-        load="$2"
-        shift; shift;
-        ;;
-      --new|-n)
-        [ $# -ge 2 ] || die "you must specify a profile to create\n\n$usage"
-        new="$2";shift; shift
-        ;;
+    def profiles(self) -> list[QutebrowserProfile]:
+        return list(self._populate_profiles())  # new list to prevent external changes
 
-      --restore|-r)
-        # these are qutebrowser args that interfere with our profile management, so we filter them out
-        echo "warning: ignoring $1" >&2
-        shift; shift; # -r has a <session> arg, so skip that too
-        ;;
+    def get_profile(self, profile_name: str) -> QutebrowserProfile:
+        for profile in self._populate_profiles():
+            if profile.profile_name == profile_name:
+                return profile
 
-      --override-restore|-R)
-        # these are qutebrowser args that interfere with our profile management, so we filter them out
-        echo "warning: ignoring $1" >&2
-        shift;
-        ;;
+        raise NoSuchProfileError(profile_name)
 
-      *) qbArgs+=("$1"); shift; ;;
-    esac
-  done
-fi
+    def _exists(self, profile_name):
+        """Checks if a profile with the given name exists under profiles_root. Looks at the filesystem
+        and not at the _profiles cache."""
+        item_path = os.path.join(self.profiles_root, profile_name)
 
-if [ -z "$dmenu" ]; then
-  if which rofi >/dev/null; then
-    dmenu="rofi -dmenu"
-    rofi=1
+        # our profilesRoot may contain dirs that are not qutebrowser profiles, so we look for
+        # the 'state' file to determine whether something is a profile, and then pipe thru dirname
+        # find "$profilesRoot" -mindepth 2 -maxdepth 2 -name state -type f -printf "%P\n" | xargs dirname
+        return os.path.isdir(item_path) and os.path.exists(os.path.join(item_path, 'state'))
 
-  elif which dmenu >/dev/null; then
-    dmenu="dmenu"
+    def new(self, profile_name) -> QutebrowserProfile:
+        """Creates a new QutebrowserProfile as part of this QutebrowserProfiles instance, including
+        its profile dirs."""
+        if self._exists(profile_name):
+            raise ProfileAlreadyExistsError(profile_name)
 
-  else
-    die "neither dmenu or rofi are available on \$PATH; either install them or use --dmenu to specify manually"
-  fi
-fi
+        result = QutebrowserProfile(parent=self, profile_name=profile_name)
+        self._populate_profiles().append(result)
+        result.mkbasedir()
 
-if [ -z "$new" ] && [ $choose -eq 0 ] && [ $list -eq 0 ]; then
-  # if user chose neither --choose or --list, assume --choose
-  choose=1
-fi
+        return result
 
-if [ $list -eq 1 ]; then
-  listProfiles
 
-elif [ $choose -eq 1 ]; then
-  [ -n "$new" ] && die "cannot use --choose with --new"
-  [ -n "$load" ] && die "cannot use --choose with --load"
+    def run_qb(self, qutebrowser: str, profile: QutebrowserProfile, args: list[Optional[str]] = [], show_stdio: bool = False):
+        if not isinstance(profile, QutebrowserProfile):
+            raise ValueError(f'profile must be a QutebrowserProfile, not {type(profile)}')
 
-  dmenuArgs="-p qutebrowser"
 
-  [ $rofi -eq 1 ] && dmenuArgs="$dmenuArgs -mesg ${qbArgs:-}"
+        # (--basedir) basedir_specified=1 ;;
+        # (-r|-[!-]*r|--restore) test $# -gt 0 && session="$1" && shift && continue ;;
 
-  [ $onlyExisting -eq 1 ] && dmenuArgs="$dmenuArgs -no-custom"
+        # Set up session base directory, unless --basedir has been specified by the
+        # user:
+        profile.mkbasedir()
 
-  set +e
-  chosenProfile=$(
-    listProfiles | $dmenu $dmenuArgs
-  )
-  set -e
+        # Translate options: remove occurrences of -r/--restore from the list of
+        # command line arguments and save the session name for later
+        for idx, arg in enumerate(args):
+            if arg is None:
+                continue
+            if arg in ['--restore', '-r' ]:
+                args[idx] = None
+                args[idx+1] = None
+            if arg in ['--override-restore', '-R' ]:
+                args[idx] = None
 
-  if [ -z "$chosenProfile" ]; then
-    # if user chooses no profile, treat this as an intended cancellation and exit
-    # with success (zero), so xdg-open does not try other browsers thinking we failed
-    echo "no profile chosen" >&2
-    exit 0
-  fi
+        args = [ qutebrowser, '--basedir', profile.basedir ] + list(filter(lambda x: x is not None, args))
 
-  [ $onlyExisting -eq 1 ] && checkProfileExists "$chosenProfile" # double-check
+        stdin = None
+        stderr = None
+        stdout = None
 
-  runQbWithProfile "$chosenProfile"
+        if not show_stdio:
+            stdin = subprocess.DEVNULL
+            stderr = subprocess.DEVNULL
+            stdout = subprocess.DEVNULL
 
-elif [ -n "$load" ]; then
-  [ -n "$new" ] && die "cannot use --load with --new"
-  checkProfileExists "$load"
-  
-  runQbWithProfile "$load"
+        p = subprocess.Popen(args, stdin=stdin, stdout=stdout, stderr=stderr)
+        print(f'started process {p.pid}')
 
-elif [ -n "$new" ]; then
-  [ -n "$load" ] && die "cannot use --load with --new"
-  
-  runQbWithProfile "$new"
-fi
+
+@click.command(context_settings=dict(
+    ignore_unknown_options=True,
+))
+@click.option(
+    "--profiles-root",
+    default=expand(f"{xdg_data_home}/qutebrowser"),  # "/run/user/$uid/qutebrowser"
+    help="The directory to store profiles in",
+)
+@click.option(
+    "--choose/--no-choose",
+    default=False,
+    help="Prompt the user to choose a profile, then launch it",
+)
+@click.option(
+    "--load",
+    default=None,
+    help="Load the given profile (fails if profile does not exist, see --new)",
+)
+@click.option(
+    "--new/--no-new",
+    default=False,
+    help="Allow --load to create a new profile if it does not exist",
+)
+@click.option(
+    "--dmenu",
+    required=False,
+    help="Override the location of dmenu/rofi when using --choose",
+)
+@click.option(
+    "--only-existing/--no-only-existing",
+    default=False,
+    help="Do not allow the user to specify a new (non-existent) profile during --choose",
+)
+@click.option(
+    "--list-profiles/--no-list-profiles", "--list/--no-list", '-l/ ',
+    default=False,
+    help="List existing profiles",
+)
+@click.option(
+    "--show-stdio/--no-show-stio",
+    default=False,
+    help="Show stdout/stderr from qutebrowser when it is launched",
+)
+@click.option(
+    "--qutebrowser",
+    default=shutil.which("qutebrowser"),
+    help="Location of qutebrowser launcher",
+)
+# eat up remaining args to pass to qutebrowser
+@click.argument('qb_args', nargs=-1, type=click.UNPROCESSED)
+def main(
+    profiles_root: str,
+    choose: bool,
+    load: Optional[str],
+    new: bool,
+    dmenu: Optional[str],
+    only_existing: bool,
+    list_profiles: bool,
+    qutebrowser: str,
+    qb_args: tuple[str],
+    show_stdio: bool,
+):
+    # Set default values as defined in XDG base directory spec
+    # https://specifications.freedesktop.org/basedir-spec/latest/
+
+    qp = QutebrowserProfiles(
+        profiles_root=profiles_root,
+        xdg_runtime_dir = xdg_runtime_dir,
+        xdg_config_home = xdg_config_home,
+        xdg_cache_home = xdg_cache_home,
+        xdg_data_home = xdg_data_home,
+    )
+
+    if list_profiles:
+        if choose or load:
+            raise click.BadParameter('cannot use --choose, --list or --load together')
+
+        profiles = qp.profiles()
+        for profile in profiles:
+            print(profile)
+
+    if choose:
+        if list_profiles or load:
+            raise click.BadParameter('cannot use --choose, --list or --load together')
+
+        profiles = qp.profiles()
+
+        if not dmenu:
+            rofi = shutil.which("rofi")
+            if rofi:
+                dmenu = f"{rofi} -dmenu"
+
+            dmenu = shutil.which("dmenu")
+
+        if not dmenu:
+            # use terminal selection
+            for idx, profile in enumerate(profiles):
+                print(f'{idx+1}. {profile.profile_name}')
+
+            print('')
+            print('Choose a number or name: ')
+            ans = input()
+
+            try:
+                idx = int(ans)
+                profile = profiles[idx-1]
+
+            except ValueError: # ans wasn't a number
+                profile = qp.get_profile(ans)
+
+        else:
+
+            dmenuArgs = shlex.split(dmenu) + ["-p", "qutebrowser"]
+
+            if only_existing:
+                dmenuArgs.append("-no-custom")
+
+            p = subprocess.Popen(dmenuArgs,
+                                     stdin=subprocess.PIPE,
+                                     stderr=subprocess.PIPE,
+                                     stdout=subprocess.PIPE)
+
+            choice_lines = '\n'.join(map(lambda px: px.profile_name, profiles))
+            choice, errors = p.communicate(choice_lines.encode('utf-8'))
+
+            if p.returncode not in [0, 1] or (p.returncode == 1 and len(errors) != 0):
+                raise ValueError(
+                    "{} returned {} and error:\n{}"
+                    .format(dmenuArgs, p.returncode, errors.decode('utf-8'))
+                )
+
+            profile_name = choice.decode('utf-8').rstrip()
+            profile = qp.get_profile(profile_name)
+
+        qp.run_qb(qutebrowser=qutebrowser, profile=profile, args=list(qb_args), show_stdio=show_stdio,)
+
+    if load:
+        if list_profiles or choose:
+            raise click.BadParameter('cannot use --choose, --list or --load together')
+
+        try:
+            profile = qp.get_profile(load)
+            if not profile:
+                raise click.BadParameter(f'profile {load} does not exist')
+
+        except NoSuchProfileError:
+            if new:
+                profile = qp.new(load)
+            else:
+                raise
+
+        qp.run_qb(qutebrowser=qutebrowser, profile=profile, args=list(qb_args), show_stdio=show_stdio)
+
+
+if __name__ == '__main__':
+    main()
