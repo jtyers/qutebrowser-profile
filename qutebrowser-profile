@@ -288,7 +288,7 @@ def main(
         xdg_data_home = xdg_data_home,
     )
 
-    if not list_profiles or load or choose:
+    if not (list_profiles or load or choose):
         choose = True
 
     if list_profiles:
