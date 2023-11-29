@@ -297,7 +297,7 @@ def main(
 
         profiles = qp.profiles()
         for profile in profiles:
-            print(profile)
+            print(profile.profile_name)
 
     if choose:
         if list_profiles or load:
