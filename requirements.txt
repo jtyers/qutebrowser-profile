@@ -1,2 +1,2 @@
-attrs
-click
+attrs==22.2.0
+click==8.1.7
