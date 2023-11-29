@@ -288,6 +288,9 @@ def main(
         xdg_data_home = xdg_data_home,
     )
 
+    if not list_profiles or load or choose:
+        choose = True
+
     if list_profiles:
         if choose or load:
             raise click.BadParameter('cannot use --choose, --list or --load together')

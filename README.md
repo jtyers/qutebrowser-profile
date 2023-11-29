@@ -26,12 +26,14 @@ To create a new profile, just call the script:
 
 `qutebrowser-profile`
 
-You'll get a rofi/dmenu prompt asking for a profile name. Type one in and hit enter, and qutebrowser will load your profile.
+You'll get a rofi prompt asking for a profile name (if you don't have `rofi` installed, the script will try to use `dmenu`, and fallback to asking via the terminal). Type one in and hit enter, and qutebrowser will load your profile.
 
 Note that:
 * qutebrowser's window will have `[my-profile-name]` at the start, so you can easily distinguish different qutebrowsers loaded with different profiles
 * qutebrowser loads configuration from the normal location (and all qutebrowsers share configuration regardless of profile, this includes quickmarks/bookmarks)
 * other data, such as session history, cache, cookies, etc, will be unique to that profile
+
+Credit to @ayekat for the inspiration for the approach.
 
 ## Other options
 
@@ -41,34 +43,27 @@ Here's the full options list (also available with `--help`):
   qutebrowser-profile - use qutebrowser with per-profile cache, session history, etc
 
 USAGE
-  qutebrowser-profile [--list] [--choose [--only-existing] | --load <name> | --new <name>] [qutebrowser args]
-  
-  --load <name>
-    Load named profile and run qutebrowser.
-    
-  --new <name>
-    Created named profile and launch qutebrowser with it. 
+    Usage: qutebrowser-profile [OPTIONS] [QB_ARGS]...
 
-  --choose, -c
-    If specified, the user is asked to select a profile via dmenu. If dmenu returns an empty string or non-zero 
-    exit code (eg user pressed escape instead of choosing an option) the operation is aborted and qutebrowser 
-    is not opened.
- 
-    The user can choose any existing profile or type the name of a new profile into dmenu to load qutebrowser
-    in a new profile. See --only-existing below to restrict this.
- 
-  --only-existing, -e
-    If specified, and --choose is in operation, the user can only choose an existing profile.
- 
-  --list
-    List all known profiles.
-  
-  --dmenu
-    Override location of dmenu. Rofi is autodetected without you needing to set this.
-  
-  --qutebrowser
-    Override location of qutebrowser to call.
-
+    Options:
+      --profiles-root TEXT            The directory to store profiles in
+      --choose / --no-choose          Prompt the user to choose a profile, then
+                                      launch it (try rofi, dmenu then fallback to terminal)
+      --load TEXT                     Load the given profile (fails if profile
+                                      does not exist, see --new)
+      --new / --no-new                Allow --load to create a new profile if it
+                                      does not exist
+      --dmenu TEXT                    Override the location of dmenu/rofi when
+                                      using --choose
+      --only-existing / --no-only-existing
+                                      Do not allow the user to specify a new (non-
+                                      existent) profile during --choose
+      -l, --list-profiles, --list / --no-list-profiles, --no-list
+                                      List existing profiles
+      --show-stdio / --no-show-stio   Show stdout/stderr from qutebrowser when it
+                                      is launched
+      --qutebrowser TEXT              Location of qutebrowser launcher
+      --help                          Show this message and exit.
 ```
 
 ## Licence
