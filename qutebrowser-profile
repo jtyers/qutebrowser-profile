@@ -288,7 +288,7 @@ class QutebrowserProfiles:
     help="List existing profiles",
 )
 @click.option(
-    "--show-stdio/--no-show-stio",
+    "--show-stdio/--no-show-stdio",
     default=False,
     help="Show stdout/stderr from qutebrowser when it is launched",
 )
