@@ -24,11 +24,14 @@
 
 from __future__ import annotations
 from attrs import define
+import colorama
 import click
 import os
-import subprocess
 import shlex
 import shutil
+import subprocess
+import sys
+from typing import Any
 from typing import Generator
 from typing import Optional
 
@@ -71,6 +74,21 @@ class QutebrowserProfile:
     def basedir(self):
         return os.path.join(f"{self.parent.xdg_runtime_dir}/qutebrowser/{self.profile_name}")
 
+    def _dirs_and_links(self):
+        return dict(
+            dirs=[
+                self.basedir,
+                f"{self.parent.xdg_cache_home}/qutebrowser/{self.profile_name}",
+                f"{self.parent.xdg_data_home}/qutebrowser/{self.profile_name}",
+                f"{self.basedir}/runtime",
+            ],
+            links=[
+                (f"{self.parent.xdg_cache_home}/qutebrowser/{self.profile_name}", f"{self.basedir}/cache"),
+                (f"{self.parent.xdg_data_home}/qutebrowser/{self.profile_name}", f"{self.basedir}/data"),
+                (f"{self.parent.xdg_config_home}/qutebrowser", f"{self.basedir}/config"),
+            ],
+        )
+
     def mkbasedir(self):
         # https://github.com/ayekat/localdir/blob/35fa033fb1274807c907a4a83431d3a8222283f6/lib/dotfiles/wrappers/qutebrowser
         # https://wiki.archlinux.org/index.php/Qutebrowser#dwb-like_session_handling
@@ -105,23 +123,38 @@ class QutebrowserProfile:
         # Enhanced a little by jonny on a dreary cold Friday morning in December 2018.
         #
 
-        for d in [
-            self.basedir,
-            f"{self.parent.xdg_config_home}/qutebrowser",
-            f"{self.parent.xdg_cache_home}/qutebrowser/{self.profile_name}",
-            f"{self.parent.xdg_data_home}/qutebrowser/{self.profile_name}",
-            f"{self.basedir}/runtime",
-        ]:
+        dirs_and_links = self._dirs_and_links()
+
+        for d in dirs_and_links['dirs']:
             os.makedirs(d, exist_ok=True)
 
-        for src, dst in [
-            (f"{self.parent.xdg_config_home}/qutebrowser", f"{self.basedir}/config"),
-            (f"{self.parent.xdg_cache_home}/qutebrowser/{self.profile_name}", f"{self.basedir}/cache"),
-            (f"{self.parent.xdg_data_home}/qutebrowser/{self.profile_name}", f"{self.basedir}/data"),
-        ]:
+        for src, dst in dirs_and_links['links']:
             if os.path.exists(dst):
                 os.unlink(dst)
             os.symlink(src, dst, target_is_directory=False)
+
+    def remove(self):
+        # Delete the profile's directories and all associated links from the filesystem
+        dirs_and_links = self._dirs_and_links()
+
+        # do links first, as some (or all) of them will reside in basedir, which is one of the dirs
+        for src, dst in dirs_and_links['links']:
+            if os.path.exists(dst):
+                if not os.path.issymlink(dst):
+                    print(colorama.Fore.RED, f'warning: did not remove {dst} as it is not a symlink', colorama.Fore.RESET, file=sys.stderr)
+
+                else:
+                    print(colorama.Fore.YELLOW, f'removing {dst}', colorama.Fore.RESET, file=sys.stderr)
+                    os.unlink(dst)
+
+        for d in dirs_and_links['dirs']:
+            if os.path.exists(d):
+                if not os.path.isdir(d):
+                    print(colorama.Fore.RED, f'warning: did not remove {d} as it is not a directory', colorama.Fore.RESET, file=sys.stderr)
+                else:
+                    print(colorama.Fore.YELLOW, f'removing {d}', colorama.Fore.RESET, file=sys.stderr)
+                    shutil.rmtree(d, ignore_errors=True)
+
 
 @define
 class QutebrowserProfiles:
@@ -181,10 +214,6 @@ class QutebrowserProfiles:
         if not isinstance(profile, QutebrowserProfile):
             raise ValueError(f'profile must be a QutebrowserProfile, not {type(profile)}')
 
-
-        # (--basedir) basedir_specified=1 ;;
-        # (-r|-[!-]*r|--restore) test $# -gt 0 && session="$1" && shift && continue ;;
-
         # Set up session base directory, unless --basedir has been specified by the
         # user:
         profile.mkbasedir()
@@ -200,7 +229,7 @@ class QutebrowserProfiles:
             if arg in ['--override-restore', '-R' ]:
                 args[idx] = None
 
-        args = [ qutebrowser, '--basedir', profile.basedir ] + list(filter(lambda x: x is not None, args))
+        args_ = [ qutebrowser, '--basedir', profile.basedir ] + list(filter(lambda x: x is not None, args))
 
         stdin = None
         stderr = None
@@ -211,7 +240,7 @@ class QutebrowserProfiles:
             stderr = subprocess.DEVNULL
             stdout = subprocess.DEVNULL
 
-        p = subprocess.Popen(args, stdin=stdin, stdout=stdout, stderr=stderr)
+        p = subprocess.Popen(args_, stdin=stdin, stdout=stdout, stderr=stderr)
         print(f'started process {p.pid}')
 
 
@@ -232,6 +261,11 @@ class QutebrowserProfiles:
     "--load",
     default=None,
     help="Load the given profile (fails if profile does not exist, see --new)",
+)
+@click.option(
+    "--remove",
+    default=None,
+    help="Delete the given profile (including cache, cookies, history, site data etc) from the filesystem",
 )
 @click.option(
     "--new/--no-new",
@@ -269,6 +303,7 @@ def main(
     profiles_root: str,
     choose: bool,
     load: Optional[str],
+    remove: Optional[str],
     new: bool,
     dmenu: Optional[str],
     only_existing: bool,
@@ -288,20 +323,46 @@ def main(
         xdg_data_home = xdg_data_home,
     )
 
-    if not (list_profiles or load or choose):
+    # as we're using arguments to simulate commands, we have to manually enforce that
+    # some commands aren't specified together
+    @define
+    class MutuallyExclusiveCommands:
+        mutually_exclusive: list[tuple[str, Optional[Any]]]
+
+        def check_if_any_mutually_exclusive(self, except_keys: list[str] = []) -> bool:
+            # check if any args specified in 'mutually_exclusive' are set, except for any
+            # specified under 'except_keys' (which should be arg strings, such as ['--load'])
+            for k, v in self.mutually_exclusive:
+                if k in except_keys:
+                    continue
+                if v:
+                    return True
+
+            return False
+
+        def raise_if_any_mutually_exclusive(self, except_keys: list[str] = []):
+            if self.check_if_any_mutually_exclusive(except_keys):
+                raise click.BadParameter(f'cannot use {", ".join(map(lambda me: me[0], self.mutually_exclusive))} together')
+
+    mutually_exclusive = MutuallyExclusiveCommands([
+            ('--load', load),
+            ('--choose', choose),
+            ('--list', list_profiles),
+            ('--remove', remove),
+        ])
+
+    if not mutually_exclusive.check_if_any_mutually_exclusive():
         choose = True
 
     if list_profiles:
-        if choose or load:
-            raise click.BadParameter('cannot use --choose, --list or --load together')
+        mutually_exclusive.raise_if_any_mutually_exclusive(except_keys=['--list'])
 
         profiles = qp.profiles()
         for profile in profiles:
             print(profile.profile_name)
 
     if choose:
-        if list_profiles or load:
-            raise click.BadParameter('cannot use --choose, --list or --load together')
+        mutually_exclusive.raise_if_any_mutually_exclusive(except_keys=['--choose'])
 
         profiles = qp.profiles()
 
@@ -355,13 +416,10 @@ def main(
         qp.run_qb(qutebrowser=qutebrowser, profile=profile, args=list(qb_args), show_stdio=show_stdio,)
 
     if load:
-        if list_profiles or choose:
-            raise click.BadParameter('cannot use --choose, --list or --load together')
+        mutually_exclusive.raise_if_any_mutually_exclusive(except_keys=['--load'])
 
         try:
             profile = qp.get_profile(load)
-            if not profile:
-                raise click.BadParameter(f'profile {load} does not exist')
 
         except NoSuchProfileError:
             if new:
@@ -370,6 +428,12 @@ def main(
                 raise
 
         qp.run_qb(qutebrowser=qutebrowser, profile=profile, args=list(qb_args), show_stdio=show_stdio)
+
+    if remove:
+        mutually_exclusive.raise_if_any_mutually_exclusive(except_keys=['--remove'])
+
+        profile = qp.get_profile(remove)
+        profile.remove()
 
 
 if __name__ == '__main__':
