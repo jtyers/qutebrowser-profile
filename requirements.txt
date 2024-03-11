@@ -1,3 +1,5 @@
 attrs==22.2.0
+cattrs==23.1.2
 click==8.1.7
 colorama==0.4.6
+pyyaml==6.0.1
